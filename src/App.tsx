@@ -12,7 +12,6 @@ function App(): JSX.Element {
             ref={viewRef}
         >
             {result && <Text>{JSON.stringify(result)}</Text>}
-            {/* <BottomSheetScan bottomSheetRef={bottomSheetRef} result={result} reset={reset} /> */}
         </DataCaptureView>
     )
 }

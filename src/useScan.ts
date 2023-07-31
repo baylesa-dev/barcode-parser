@@ -22,36 +22,16 @@ const LICENSE_KEY = '//'
 
 export type Result = {
     rawData: string
-    ai?: string | null
-    exp?: string | null
-    batch?: string | null
     symbology: string
-}
-
-function extractInfoFromGTIN(gtin: string): {
-    ai: string
-    batch?: string
-    exp?: string
-} {
-    const aiMatch = gtin.match(/(?:\()?01(?:\))?(\d{13,14})/)
-    const batchMatch = gtin.match(/(?:\()?10(?:\))?(.+)/)
-    const expMatch = gtin.match(/(?:\()?17(?:\))?(\d+)/)
-
-    const ai = aiMatch ? aiMatch[1] : ''
-    const batch = batchMatch ? batchMatch[1] : undefined
-    const exp = expMatch ? expMatch[1] : undefined
-
-    return { ai, batch, exp }
 }
 
 export default function useScan() {
     const viewRef = useRef<DataCaptureView>(null)
     const dataCaptureContext = useMemo(() => DataCaptureContext.forLicenseKey(LICENSE_KEY), [])
     const [camera, setCamera] = useState<Camera | null>(Camera.default)
-
+    const [parser, setParser] = useState<Parser | null>(null)
     const [barcodeSelection, setBarcodeSelection] = useState<BarcodeSelection | null>(null)
     const [cameraState, setCameraState] = useState(FrameSourceState.Off)
-    const lastCommand = useRef<string | null>(null)
 
     const [result, setResult] = useState<Result | null>(null)
 
@@ -62,7 +42,6 @@ export default function useScan() {
         )
 
         setupScanning()
-        setupParser()
         startCapture()
 
         return () => {
@@ -78,7 +57,6 @@ export default function useScan() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [cameraState])
 
-    const parser = useRef<Parser | null>()
     const setupScanning = () => {
         camera?.applySettings(BarcodeSelection.recommendedCameraSettings)
 
@@ -99,6 +77,10 @@ export default function useScan() {
         const selectionSettings = new BarcodeSelectionSettings()
         selectionSettings.enableSymbologies([Symbology.DataMatrix, Symbology.Code128])
 
+        Parser.forContextAndFormat(dataCaptureContext, ParserDataFormat.GS1AI).then(_parser => {
+            setParser(_parser)
+        })
+
         const barcodeSelection = BarcodeSelection.forContext(dataCaptureContext, selectionSettings)
         barcodeSelection.addListener({
             didUpdateSelection: (_, session) => {
@@ -106,10 +88,9 @@ export default function useScan() {
                 if (barcode) {
                     const symbology = new SymbologyDescription(barcode.symbology)
 
-                    const matched = extractInfoFromGTIN(barcode.data ?? '')
 
-                    if (barcode.data && parser.current) {
-                        parser.current.parseString(barcode.data).then(result => {
+                    if (barcode.data && parser) {
+                        parser.parseString(barcode.data).then(result => {
                             // fails here
                             console.log(result)
                         })
@@ -117,7 +98,6 @@ export default function useScan() {
 
                     setResult({
                         rawData: barcode.data ?? '',
-                        ...(matched ?? {}),
                         symbology: symbology.identifier
                     })
                 } else {
@@ -137,45 +117,28 @@ export default function useScan() {
         setBarcodeSelection(barcodeSelection)
     }
 
-    const setupParser = () => {
-        Parser.forContextAndFormat(dataCaptureContext, ParserDataFormat.GS1AI).then(
-            value => (parser.current = value)
-        )
+    const startCamera = () => {
+        setCameraState(FrameSourceState.On)
     }
 
-    const startCamera = useCallback(() => {
-        setCameraState(FrameSourceState.On)
-    }, [])
-
-    const stopCamera = useCallback(() => {
+    const stopCamera = () => {
         if (camera) setCameraState(FrameSourceState.Off)
-    }, [camera])
+    }
 
-    const startCapture = useCallback(() => {
-        if (lastCommand.current === 'startCapture') {
-            return
-        }
-        lastCommand.current = 'startCapture'
+    const startCapture = () => {
         startCamera()
         if (barcodeSelection) barcodeSelection.isEnabled = true
-    }, [startCamera])
+    }
 
-    const stopCapture = useCallback(() => {
-        if (lastCommand.current === 'stopCapture') {
-            return
-        }
-        lastCommand.current = 'stopCapture'
+    const stopCapture = () => {
         if (barcodeSelection) barcodeSelection.isEnabled = false
         stopCamera()
-    }, [stopCamera])
+    }
 
-    const handleAppStateChange = useCallback(
-        (appState: AppStateStatus) => {
-            if (appState.match(/inactive|background/)) stopCapture()
-            else startCapture()
-        },
-        [startCapture, stopCapture]
-    )
+    const handleAppStateChange = (appState: AppStateStatus) => {
+        if (appState.match(/inactive|background/)) stopCapture()
+        else startCapture()
+    }
 
     const reset = useCallback(() => {
         setResult(null)
